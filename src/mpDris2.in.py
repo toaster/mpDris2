@@ -541,16 +541,13 @@ class MPDWrapper(object):
                 self._metadata['xesam:discNumber'] = int(m.group(1))
 
         if 'artist' in mpd_meta:
-            if type(mpd_meta['artist']) == list:
-                self._metadata['xesam:artist'] = mpd_meta['artist']
-            else:
-                self._metadata['xesam:artist'] = [mpd_meta['artist']]
+            self._update_meta_datum_list(mpd_meta, 'artist', 'xesam:artist')
 
         if 'composer' in mpd_meta:
-            if type(mpd_meta['composer']) == list:
-                self._metadata['xesam:composer'] = mpd_meta['composer']
-            else:
-                self._metadata['xesam:composer'] = [mpd_meta['composer']]
+            self._update_meta_datum_list(mpd_meta, 'composer', 'xesam:composer')
+
+        if 'albumartist' in mpd_meta:
+            self._update_meta_datum_list(mpd_meta, 'albumartist', 'xesam:albumArtist')
 
         # Stream: populate some missings tags with stream's name
         if 'name' in mpd_meta:
@@ -576,6 +573,12 @@ class MPDWrapper(object):
                 del self._metadata[key]
                 logger.error("Can't cast value %r to %s" %
                              (value, allowed_tags[key]))
+
+    def _update_meta_datum_list(self, mpd_meta, mpd_key, key):
+        if type(mpd_meta[mpd_key]) == list:
+            self._metadata[key] = mpd_meta[mpd_key]
+        else:
+            self._metadata[key] = [mpd_meta[mpd_key]]
 
     def notify_about_track(self, meta, state='play'):
         uri = 'sound'
