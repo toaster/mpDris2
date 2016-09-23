@@ -642,8 +642,12 @@ class MPDWrapper(object):
                         return 'file://' + os.path.join(song_dir, f)
 
             # Search the shared cover directories
-            if 'xesam:artist' in self._metadata and 'xesam:album' in self._metadata:
-                artist = ",".join(self._metadata['xesam:artist'])
+            if 'xesam:album' in self._metadata:
+                if 'xesam:albumArtist' in self._metadata:
+                    artist = ",".join(self._metadata['xesam:albumArtist'])
+                elif 'xesam:artist' in self._metadata:
+                    artist = ",".join(self._metadata['xesam:artist'])
+
                 album = self._metadata['xesam:album']
                 for template in downloaded_covers:
                     f = os.path.expanduser(template % (artist, album))
