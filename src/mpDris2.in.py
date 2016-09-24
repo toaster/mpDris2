@@ -41,6 +41,8 @@ from six.moves import urllib
 from six.moves import http_client
 import json
 
+import subprocess
+
 __version__ = "@version@"
 __git_version__ = "@gitversion@"
 
@@ -300,6 +302,8 @@ class MPDWrapper(object):
 
         self._playlists = None
 
+        self._shout_player = None
+
         self._bus = dbus.SessionBus()
         if self._params['mmkeys']:
             self.setup_mediakeys()
@@ -422,6 +426,7 @@ class MPDWrapper(object):
         self.run()
 
     def disconnect(self):
+        self._stop_shout_player()
         self._temp_song_url = None
         if self._temp_cover:
             self._temp_cover.close()
@@ -842,6 +847,17 @@ class MPDWrapper(object):
             self._dbus_service.update_property('org.mpris.MediaPlayer2.Player',
                                                'PlaybackStatus')
 
+        if new_status['state'] == 'play' and 'shout_player' in self._params:
+            logger.debug("shout: " + str(self._shout_player))
+            if self._shout_player:
+                logger.debug("shout_player.poll: " + str(self._shout_player.poll()))
+            if not self._shout_player or self._shout_player.poll() != None:
+                command = self._params['shout_player'].strip().splitlines()
+                logger.debug('start: %s' % command)
+                self._shout_player = subprocess.Popen(command)
+                if self._shout_player.poll():
+                    logger.error('failed: %s' % command)
+
         if not force:
             old_id = old_status.get('songid', None)
             new_id = new_status.get('songid', None)
@@ -910,6 +926,16 @@ class MPDWrapper(object):
         self.load(self.playlists()[playlist_id])
         self.play()
         return
+
+    def stop(self):
+        self.call('stop')
+        self._stop_shout_player()
+
+    def _stop_shout_player(self):
+        if self._shout_player:
+            self._shout_player.kill()
+            self._shout_player.wait()
+            self._shout_player = None
 
     ## Media keys
 
@@ -1445,6 +1471,9 @@ if __name__ == '__main__':
 
     if config.has_option('Discogs', 'api_token'):
         params['discogs_api_token'] = config.get('Discogs', 'api_token')
+
+    if config.has_option('ShoutPlayer', 'command'):
+        params['shout_player'] = config.get('ShoutPlayer', 'command')
 
     try:
         (opts, args) = getopt.getopt(sys.argv[1:], 'hdvp:', ['help', 'debug', 'version', 'path='])
