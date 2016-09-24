@@ -682,6 +682,12 @@ class MPDWrapper(object):
                     if cover_url:
                         return cover_url
 
+                # Download from spotify
+                for a in (albumArtist, artist):
+                    cover_url = self._download_cover_from_spotify(a, album, image_path)
+                    if cover_url:
+                        return cover_url
+
         return None
 
     def _download_cover_from_last_fm(self, query, image_path):
@@ -709,6 +715,28 @@ class MPDWrapper(object):
                 images = response_data['album']['image']
                 if images:
                     image_url = images[-1]['#text']
+                    return self._download_cover(image_url, image_path)
+
+    def _download_cover_from_spotify(self, artist, album, image_path):
+        params = urllib.parse.urlencode({
+            'type': 'album',
+            'q': "album:%s artist:%s" % (album, artist),
+        })
+        conn = http_client.HTTPSConnection("api.spotify.com", timeout = 3)
+        logger.debug("query spotify with %s" % params)
+        conn.request("GET", "/v1/search?" + params)
+        try:
+            response = conn.getresponse()
+        except Exception as e:
+            response = None
+            logger.error("exception during cover fetch from spotify: %s" % e)
+        if response and response.status == 200:
+            response_data = json.loads(response.read().decode("utf-8"))
+            albums = response_data['albums']['items']
+            if albums:
+                images = albums[0]['images']
+                if images:
+                    image_url = images[0]['url']
                     return self._download_cover(image_url, image_path)
 
     def _download_cover(self, image_url, image_path):
