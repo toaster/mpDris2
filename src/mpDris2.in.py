@@ -37,6 +37,10 @@ import gettext
 import time
 import tempfile
 
+from six.moves import urllib
+from six.moves import http_client
+import json
+
 __version__ = "@version@"
 __git_version__ = "@gitversion@"
 
@@ -550,6 +554,9 @@ class MPDWrapper(object):
         if 'albumartist' in mpd_meta:
             self._update_meta_datum_list(mpd_meta, 'albumartist', 'xesam:albumArtist')
 
+        if 'musicbrainz_albumid' in mpd_meta:
+            self._update_meta_datum_list(mpd_meta, 'musicbrainz_albumid', 'xesam:musicBrainzAlbumID')
+
         # Stream: populate some missings tags with stream's name
         if 'name' in mpd_meta:
             if 'xesam:title' not in self._metadata:
@@ -642,19 +649,75 @@ class MPDWrapper(object):
                     if params['cover_regex'].match(f):
                         return 'file://' + os.path.join(song_dir, f)
 
-            # Search the shared cover directories
+            album = artist = None
             if 'xesam:album' in self._metadata:
-                if 'xesam:albumArtist' in self._metadata:
-                    artist = ",".join(self._metadata['xesam:albumArtist'])
-                elif 'xesam:artist' in self._metadata:
-                    artist = ",".join(self._metadata['xesam:artist'])
-
                 album = self._metadata['xesam:album']
+                if 'xesam:artist' in self._metadata:
+                    artist = albumArtist = ",".join(self._metadata['xesam:artist'])
+                if 'xesam:albumArtist' in self._metadata:
+                    albumArtist = ",".join(self._metadata['xesam:albumArtist'])
+                    if not artist:
+                        artist = albumArtist
+
+            if album and albumArtist:
+                # Search the shared cover directories or download if not found
                 for template in downloaded_covers:
-                    f = os.path.expanduser(template % (artist, album))
+                    f = os.path.expanduser(template % (albumArtist, album))
                     if os.path.exists(f):
                         return 'file://' + f
+
+            image_path = os.path.expanduser(downloaded_covers[0] % (albumArtist, album))
+            if 'xesam:musicBrainzAlbumID' in self._metadata:
+                # Download from lastfm
+                cover_url = self._download_cover_from_last_fm(
+                        {'mbid': self._metadata['xesam:musicBrainzAlbumID']}, image_path)
+                if cover_url:
+                    return cover_url
+
+            if album and albumArtist:
+                # Download from lastfm
+                for a in (albumArtist, artist):
+                    cover_url = self._download_cover_from_last_fm(
+                            {'artist': a, 'album': album}, image_path)
+                    if cover_url:
+                        return cover_url
+
         return None
+
+    def _download_cover_from_last_fm(self, query, image_path):
+        if not self._params['last_fm_api_key']:
+            return None
+
+        params = {
+            'api_key': self._params['last_fm_api_key'],
+            'format': 'json',
+            'method': 'album.getinfo',
+        }
+        params.update(query)
+        params = urllib.parse.urlencode(params)
+        conn = http_client.HTTPSConnection("ws.audioscrobbler.com", timeout = 3)
+        logger.debug("query last.fm with %s" % params)
+        conn.request("GET", "/2.0/?" + params)
+        try:
+            response = conn.getresponse()
+        except Exception as e:
+            response = None
+            logger.error("exception during cover fetch from last.fm: %s" % e)
+        if response and response.status == 200:
+            response_data = json.loads(response.read().decode("utf-8"))
+            if 'album' in response_data:
+                images = response_data['album']['image']
+                if images:
+                    image_url = images[-1]['#text']
+                    return self._download_cover(image_url, image_path)
+
+    def _download_cover(self, image_url, image_path):
+        if image_url != "":
+            image_dir = os.path.dirname(image_path)
+            if not os.path.exists(image_dir):
+                os.makedirs(image_dir)
+            urllib.request.urlretrieve(image_url, image_path)
+            return 'file://' + image_path
 
     def last_status(self):
         if time.time() - self._time >= 2:
@@ -1237,6 +1300,9 @@ if __name__ == '__main__':
     for bling in ['mmkeys', 'notify']:
         if config.has_option('Bling', bling):
             params[bling] = config.getboolean('Bling', bling)
+
+    if config.has_option('LastFM', 'api_key'):
+        params['last_fm_api_key'] = config.get('LastFM', 'api_key')
 
     try:
         (opts, args) = getopt.getopt(sys.argv[1:], 'hdvp:', ['help', 'debug', 'version', 'path='])
