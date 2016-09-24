@@ -234,6 +234,30 @@ MPRIS2_INTROSPECTION = """<node name="/org/mpris/MediaPlayer2">
       <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="false"/>
     </property>
   </interface>
+  <interface name="org.mpris.MediaPlayer2.Playlists">
+    <method name="ActivatePlaylist">
+      <arg direction="in" name="PlaylistId" type="o"/>
+    </method>
+    <method name="GetPlaylists">
+      <arg direction="in" name="Index" type="u"/>
+      <arg direction="in" name="MaxCount" type="u"/>
+      <arg direction="in" name="Order" type="s"/>
+      <arg direction="in" name="ReverseOrder" type="b"/>
+      <arg direction="out" name="Playlists" type="a(oss)"/>
+    </method>
+    <signal name="PlaylistChanged">
+      <arg name="Playlist" type="(oss)"/>
+    </signal>
+    <property name="PlaylistCount" type="u" access="read">
+      <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="true"/>
+    </property>
+    <property name="Orderings" type="as" access="read">
+      <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="true"/>
+    </property>
+    <property name="ActivePlaylist" type="(b(oss))" access="read">
+      <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="true"/>
+    </property>
+  </interface>
 </node>"""
 
 # Default url handlers if MPD doesn't support 'urlhandlers' command
@@ -273,6 +297,8 @@ class MPDWrapper(object):
         self._temp_cover = None
         self._position = 0
         self._time = 0
+
+        self._playlists = None
 
         self._bus = dbus.SessionBus()
         if self._params['mmkeys']:
@@ -869,6 +895,22 @@ class MPDWrapper(object):
             self._dbus_service.update_property('org.mpris.MediaPlayer2.Player',
                                                'CanGoNext')
 
+    def playlists(self):
+        if not self._playlists:
+            names = map(lambda item: item['playlist'], self.listplaylists())
+            logger.debug("fetched playlists %r" % str(names))
+            self._playlists = dict(("/%s/%s" % (
+                re.sub("[^a-zA-Z0-9_]", "_", name),
+                re.sub("-", "_", str(name.__hash__()))
+            ), name) for name in names)
+        return self._playlists
+
+    def switchtoplaylist(self, playlist_id):
+        self.clear()
+        self.load(self.playlists()[playlist_id])
+        self.play()
+        return
+
     ## Media keys
 
     def setup_mediakeys(self):
@@ -1122,8 +1164,30 @@ class MPRISInterface(dbus.service.Object):
 
     __tracklist_interface = "org.mpris.MediaPlayer2.TrackList"
 
+    def __get_playlist_count():
+        logger.debug("requested playlist count")
+        x = len(mpd_wrapper.listplaylists())
+        logger.debug("requested playlist count → %d" % x)
+        return x
+
+    def __get_playlist_orderings():
+        logger.debug("requested playlist orderings")
+        return ['Ascending']
+
+    def __get_active_playlist():
+        logger.debug("requested active playlist")
+        return (False, ("/", "", ""))
+
+    __playlists_interface = "org.mpris.MediaPlayer2.Playlists"
+    __playlists_props = {
+        "PlaylistCount": (__get_playlist_count, None),
+        "Orderings": (__get_playlist_orderings, None),
+        "ActivePlaylist": (__get_active_playlist, None),
+    }
+
     __prop_mapping = {
         __player_interface: __player_props,
+        __playlists_interface: __playlists_props,
         __root_interface: __root_props,
     }
 
@@ -1258,6 +1322,17 @@ class MPRISInterface(dbus.service.Object):
     def OpenUri(self):
         # TODO
         return
+
+    @dbus.service.method(__playlists_interface, in_signature='o', out_signature='')
+    def ActivatePlaylist(self, playlist_id):
+        mpd_wrapper.switchtoplaylist(playlist_id)
+        return
+
+    @dbus.service.method(__playlists_interface, in_signature='uusb', out_signature='a(oss)')
+    def GetPlaylists(self, index, max_count, order, reverse_order):
+        # TODO index, max_count, order, reverse_order
+        playlists = mpd_wrapper.playlists()
+        return map(lambda key: (key, playlists[key], ""), playlists)
 
 def each_xdg_config(suffix):
     """
