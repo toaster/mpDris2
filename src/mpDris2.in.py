@@ -699,7 +699,7 @@ class MPDWrapper(object):
                         return 'file://' + f
 
             image_path = self._cover_path(albumArtist, album, "%s")
-            if 'xesam:musicBrainzAlbumID' in self._metadata:
+            if self._params['last_fm_api_key'] and 'xesam:musicBrainzAlbumID' in self._metadata:
                 # Download from lastfm
                 cover_url = self._download_cover_from_last_fm(
                         {'mbid': self._metadata['xesam:musicBrainzAlbumID']}, image_path)
@@ -715,11 +715,12 @@ class MPDWrapper(object):
                             return cover_url
 
                 # Download from lastfm
-                for a in (albumArtist, artist):
-                    cover_url = self._download_cover_from_last_fm(
-                            {'artist': a, 'album': album}, image_path)
-                    if cover_url:
-                        return cover_url
+                if self._params['last_fm_api_key']:
+                    for a in (albumArtist, artist):
+                        cover_url = self._download_cover_from_last_fm(
+                                {'artist': a, 'album': album}, image_path)
+                        if cover_url:
+                            return cover_url
 
                 # Download from spotify
                 for a in (albumArtist, artist):
@@ -737,71 +738,54 @@ class MPDWrapper(object):
             'token': self._params['discogs_api_token'],
             'release_title': album,
         }
-        if artist:
-            params['artist'] = artist
-        conn = http_client.HTTPSConnection("api.discogs.com", timeout = 3)
-        logger.debug("query discogs with %s" % urllib.parse.urlencode(params))
-        conn.request("GET", "/database/search?" + urllib.parse.urlencode(params), None,
-            {'User-Agent': http_user_agent})
-        try:
-            response = conn.getresponse()
-        except Exception as e:
-            response = None
-            logger.error("exception during cover fetch from discogs: %s" % e)
-        if response and response.status == 200:
-            response_data = json.loads(response.read().decode("utf-8"))
+        if artist: params['artist'] = artist
+        response_data =
+                self._perform_json_api_request("api.discogs.com", "/database/search", params)
+        if response_data:
             results = response_data['results']
             if results:
                 return self._download_cover(results[0]['thumb'], image_path)
 
     def _download_cover_from_last_fm(self, query, image_path):
-        if not self._params['last_fm_api_key']:
-            return None
-
         params = {
             'api_key': self._params['last_fm_api_key'],
             'format': 'json',
             'method': 'album.getinfo',
         }
         params.update(query)
-        params = urllib.parse.urlencode(params)
-        conn = http_client.HTTPSConnection("ws.audioscrobbler.com", timeout = 3)
-        logger.debug("query last.fm with %s" % params)
-        conn.request("GET", "/2.0/?" + params)
-        try:
-            response = conn.getresponse()
-        except Exception as e:
-            response = None
-            logger.error("exception during cover fetch from last.fm: %s" % e)
-        if response and response.status == 200:
-            response_data = json.loads(response.read().decode("utf-8"))
-            if 'album' in response_data:
-                images = response_data['album']['image']
-                if images:
-                    image_url = images[-1]['#text']
-                    return self._download_cover(image_url, image_path)
+        response_data = self._perform_json_api_request("ws.audioscrobbler.com", "/2.0/", params)
+        if response_data and 'album' in response_data:
+            images = response_data['album']['image']
+            if images:
+                image_url = images[-1]['#text']
+                return self._download_cover(image_url, image_path)
 
     def _download_cover_from_spotify(self, artist, album, image_path):
-        params = urllib.parse.urlencode({
+        params = {
             'type': 'album',
             'q': "album:%s artist:%s" % (album, artist),
-        })
-        conn = http_client.HTTPSConnection("api.spotify.com", timeout = 3)
-        logger.debug("query spotify with %s" % params)
-        conn.request("GET", "/v1/search?" + params)
-        try:
-            response = conn.getresponse()
-        except Exception as e:
-            response = None
-            logger.error("exception during cover fetch from spotify: %s" % e)
-        if response and response.status == 200:
-            response_data = json.loads(response.read().decode("utf-8"))
+        }
+        response_data = self._perform_json_api_request("api.spotify.com", "/v1/search", params)
+        if response_data:
             albums = response_data['albums']['items']
             if albums:
                 images = albums[0]['images']
                 if images:
                     image_url = images[0]['url']
                     return self._download_cover(image_url, image_path)
+
+    def _perform_json_api_request(self, host, path, params)
+        conn = http_client.HTTPSConnection(host, timeout = 3)
+        params = urllib.parse.urlencode(params)
+        logger.debug("query %s with %s" % (host, params))
+        conn.request("GET", "%s?%s" % (path, params), None, {'User-Agent': http_user_agent})
+        try:
+            response = conn.getresponse()
+            if response.status == 200:
+                return json.loads(response.read().decode("utf-8"))
+        except Exception as e:
+            logger.error("exception during cover fetch from %s: %s" % (host, e))
+        return None
 
     def _download_cover(self, image_url, image_path):
         if image_url != "":
