@@ -675,6 +675,13 @@ class MPDWrapper(object):
                     return cover_url
 
             if album and albumArtist:
+                # Download from discogs
+                if self._params['discogs_api_token']:
+                    for a in (albumArtist, artist, None):
+                        cover_url = self._download_cover_from_discogs(a, album, image_path)
+                        if cover_url:
+                            return cover_url
+
                 # Download from lastfm
                 for a in (albumArtist, artist):
                     cover_url = self._download_cover_from_last_fm(
@@ -689,6 +696,28 @@ class MPDWrapper(object):
                         return cover_url
 
         return None
+
+    def _download_cover_from_discogs(self, artist, album, image_path):
+        params = {
+            'token': self._params['discogs_api_token'],
+            'release_title': album,
+        }
+        if artist:
+            params['artist'] = artist
+        conn = http_client.HTTPSConnection("api.discogs.com", timeout = 3)
+        logger.debug("query discogs with %s" % urllib.parse.urlencode(params))
+        conn.request("GET", "/database/search?" + urllib.parse.urlencode(params), None,
+            {'User-Agent': http_user_agent})
+        try:
+            response = conn.getresponse()
+        except Exception as e:
+            response = None
+            logger.error("exception during cover fetch from discogs: %s" % e)
+        if response and response.status == 200:
+            response_data = json.loads(response.read().decode("utf-8"))
+            results = response_data['results']
+            if results:
+                return self._download_cover(results[0]['thumb'], image_path)
 
     def _download_cover_from_last_fm(self, query, image_path):
         if not self._params['last_fm_api_key']:
@@ -1331,6 +1360,9 @@ if __name__ == '__main__':
 
     if config.has_option('LastFM', 'api_key'):
         params['last_fm_api_key'] = config.get('LastFM', 'api_key')
+
+    if config.has_option('Discogs', 'api_token'):
+        params['discogs_api_token'] = config.get('Discogs', 'api_token')
 
     try:
         (opts, args) = getopt.getopt(sys.argv[1:], 'hdvp:', ['help', 'debug', 'version', 'path='])
