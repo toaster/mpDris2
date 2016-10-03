@@ -238,7 +238,8 @@ MPRIS2_INTROSPECTION = """<node name="/org/mpris/MediaPlayer2">
 
 # Default url handlers if MPD doesn't support 'urlhandlers' command
 urlhandlers = ['http://']
-downloaded_covers = ['~/.covers/%s-%s.jpg']
+downloaded_covers_dir = os.path.expanduser('~/.covers')
+cover_extensions = list(map(lambda name: os.path.extsep + name), ['jpg', 'jpeg', 'png', 'gif'])
 
 
 class MPDWrapper(object):
@@ -661,12 +662,12 @@ class MPDWrapper(object):
 
             if album and albumArtist:
                 # Search the shared cover directories or download if not found
-                for template in downloaded_covers:
-                    f = os.path.expanduser(template % (albumArtist, album))
+                for ext in cover_extensions:
+                    f = self._cover_path(albumArtist, album, ext)
                     if os.path.exists(f):
                         return 'file://' + f
 
-            image_path = os.path.expanduser(downloaded_covers[0] % (albumArtist, album))
+            image_path = self._cover_path(albumArtist, album, "%s")
             if 'xesam:musicBrainzAlbumID' in self._metadata:
                 # Download from lastfm
                 cover_url = self._download_cover_from_last_fm(
@@ -696,6 +697,9 @@ class MPDWrapper(object):
                         return cover_url
 
         return None
+
+    def _cover_path(self, albumArtist, album, ext)
+        return os.path.join(downloaded_covers_dir, "%s-%s%s" % (albumArtist, album, ext))
 
     def _download_cover_from_discogs(self, artist, album, image_path):
         params = {
@@ -773,6 +777,9 @@ class MPDWrapper(object):
             image_dir = os.path.dirname(image_path)
             if not os.path.exists(image_dir):
                 os.makedirs(image_dir)
+            ext = os.path.splitsep(image_url)[1]
+            if not ext: ext = cover_extensions[0]
+            image_path = image_path % ext
             urllib.request.urlretrieve(image_url, image_path)
             return 'file://' + image_path
 
